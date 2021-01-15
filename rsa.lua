@@ -1,6 +1,24 @@
 local ffi = require('ffi')
-local basexx = require('basexx')
-require("util")
+-- local basexx = require('basexx')
+
+local function find_shared_obj(cpath, so_name)
+    local string_gmatch = string.gmatch
+    local string_match = string.match
+    local io_open = io.open
+
+    for k in string_gmatch(cpath, "[^;]+") do
+        local so_path = string_match(k, "(.*/)")
+        so_path = so_path .. so_name
+
+        -- Don't get me wrong, the only way to know if a file exist is trying
+        -- to open it.
+        local f = io_open(so_path)
+        if f ~= nil then
+            io.close(f)
+            return so_path
+        end
+    end
+end
 
 --local rsa = ffi.load('rsa')
 local so_path = find_shared_obj(package.cpath, "librsa.so")
@@ -55,22 +73,19 @@ function _M.encrypt(plainText)
         return -1, nil
     end
     --return cipherLen, basexx.to_base64(ffi.string(cipherText, cipherLen))
-    return basexx.to_base64(ffi.string(cipherText, cipherLen))
+    -- return basexx.to_base64(ffi.string(cipherText, cipherLen))
+    return ngx.encode_base64(ffi.string(cipherText, cipherLen))
 end
 
 function _M.decrypt(b64cipherText)
     local cipherLen = 128
     local c_str = ffi.new("char[?]", cipherLen + 1)
-    ffi.copy(c_str, basexx.from_base64(b64cipherText))
+    -- ffi.copy(c_str, basexx.from_base64(b64cipherText))
+    ffi.copy(c_str, ngx.decode_base64(b64cipherText))
     local pri = ffi.new("char[?]", #RSA_PRIV_KEY)
     ffi.copy(pri, RSA_PRIV_KEY)
     local plainText = ffi.new("char[?]", 2048)
-    log(c_str)
-    log(cipherLen)
-    log(pri)
-    log(plainText)
     local plainLen = rsa.private_decrypt(c_str, cipherLen, pri, plainText)
-    log(plainLen)
     if plainLen == -1 then
         return nil
     end

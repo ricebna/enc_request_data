@@ -1,16 +1,16 @@
-local os = require "os"
 local cjson = require "cjson"
-common_path = '/usr/local/nginx/conf/lua/enc_request_data/?.lua;/usr/local/nginx/conf/lua/?/init.lua;'
+local common_path = '/usr/local/nginx/conf/lua/enc_request_data/?.lua;'
 package.path = common_path .. package.path
 local dist_fields = require "dist_fields"
 local rsa = require "rsa"
-require "util"
+local util = require "util"
 
-function enc_arr(data)
-    local is_enc = false
+local function enc_arr(data)
+    local is_enc, is_e = false, false
     if type(data) == "table" then
         for k,v in pairs(data) do
-            if in_array(k, dist_fields) or in_array(string.gsub(k, "%[]", ""), dist_fields) then
+            if util.in_array(k, dist_fields) or util.in_array(string.gsub(k, "%[]", ""), dist_fields) then
+            -- if util.in_array(k, dist_fields) then
                 if type(v) ~= "table" then
                     is_enc = true
                     data[k] = rsa.encrypt(v)
@@ -73,7 +73,7 @@ local function get_form_args()
         if error_code == 0 then
             local boundary = "--" .. string.sub(headers.content_type,31)
             -- 兼容处理：当content-type中取不到boundary时，直接从body首行提取。
-            local body_data_table = explode(tostring(body_data), boundary)  
+            local body_data_table = util.explode(tostring(body_data), boundary)  
             local first_string = table.remove(body_data_table,1)
             local last_string = table.remove(body_data_table)
             -- log(">>>>>>>>>>>>>>>>>>>>>start\n", table.concat(body_data_table,"<<<<<<>>>>>>"), ">>>>>>>>>>>>>>>>>>>>>end\n")
@@ -85,7 +85,7 @@ local function get_form_args()
                     table.insert(new_body_data,v)
                 else
                     --普通参数  
-                    local t = explode(v,"\r\n\r\n")  
+                    local t = util.explode(v,"\r\n\r\n")  
                     --[[
                         按照双换行切分后得到的table
                         第一个元素，t[1]='
@@ -141,9 +141,9 @@ local function get_form_args()
               end
           end
           -- 解析body_data
-          local post_param_table = explode(tostring(body_data), "&")
+          local post_param_table = util.explode(tostring(body_data), "&")
           for i,v in ipairs(post_param_table) do
-              local paramEntity = explode(v,"=")
+              local paramEntity = util.explode(v,"=")
               local tempValue = paramEntity[2]
               -- 对请求参数的value进行unicode解码
               tempValue = unescape(tempValue)
@@ -154,7 +154,7 @@ local function get_form_args()
     return args, file_args, is_multipart, file_md5;
 end
 
-function multipart_args_encode(args, file_args)
+local function multipart_args_encode(args, file_args)
     local form_str = ""
     local headers = ngx.req.get_headers()
     local boundary = "--" .. string.sub(headers.content_type, 31)
@@ -169,21 +169,28 @@ end
 
 xpcall(function ()
     local is_enc = false
-    if(ngx.req.get_method() == 'GET') then
-        args = ngx.req.get_uri_args()
-        args, is_enc = enc_arr(args)
-        ngx.req.set_uri_args(args)  
-    else
+    local args = ngx.req.get_uri_args()
+    args, is_enc = enc_arr(args)
+    if is_enc then
+        ngx.req.set_uri_args(args)
+    end
+    if(ngx.req.get_method() == 'POST') then
+        util.log("post")
+        local is_enc = false
         ngx.req.read_body()
-        headers = ngx.req.get_headers()
-        if string.lower(headers.content_type) == "application/json" then
+        local headers = ngx.req.get_headers()
+        util.log(headers.content_type)
+        if string.find(string.lower(headers.content_type), "application/json") then
+            util.log("解析 json")
             args = cjson.decode(ngx.req.get_body_data())
             args, is_enc = enc_arr(args)
             body = cjson.encode(args)
         else
+            util.log("解析表单")
             args, file_args, is_multipart = get_form_args()
             if args then
                 if is_multipart then
+                    util.log("multipart 表单")
                     for k, v in pairs(args) do
                         obj = {}
                         obj[v[1]] = v[2]
@@ -195,6 +202,7 @@ xpcall(function ()
                     end
                     body = multipart_args_encode(args, file_args)
                 else
+                    util.log("普通表单")
                     args, is_enc = enc_arr(args)
                     body = ngx.encode_args(args)
                 end
@@ -205,5 +213,5 @@ xpcall(function ()
         end
     end
 end, function (err) 
-    log(err)
+    util.log(err)
 end)
